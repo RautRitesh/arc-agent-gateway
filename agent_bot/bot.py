@@ -16,7 +16,9 @@ client = utils.init_developer_controlled_wallets_client(
     api_key=os.getenv("CIRCLE_API_KEY"),
     entity_secret=os.getenv("CIRCLE_ENTITY_SECRET")
 )
-circle_api = developer_controlled_wallets.DeveloperControlledWalletsApi(client)
+
+# Use TransactionsApi for transaction-related operations
+circle_api = developer_controlled_wallets.TransactionsApi(client)
 
 class AgentState(TypedDict):
     status: str; invoice: dict; tx_hash: Optional[str]
@@ -49,16 +51,22 @@ def pay_network(state):
     
     log(f"💸 Authorizing Circle Wallet: Pay {amount} USDC...", "payment")
     
-    req = developer_controlled_wallets.CreateTransferTransactionRequest.from_dict({
-        "walletId": os.getenv("CIRCLE_WALLET_ID"),
-        "tokenId": os.getenv("USDC_TOKEN_ID"),
-        "destinationAddress": dest,
-        "amounts": [amount],
-        "feeLevel": "MEDIUM"
-    })
-    
     try:
-        resp = circle_api.create_developer_controlled_wallets_transfer_transaction(req)
+        # Create the request object with the correct class name
+        # First, let's try to find the correct request class
+        request = developer_controlled_wallets.CreateTransferTransactionForDeveloperRequest(
+            wallet_id=os.getenv("CIRCLE_WALLET_ID"),
+            token_id=os.getenv("USDC_TOKEN_ID"),
+            destination_address=dest,
+            amounts=[amount],
+            fee_level="MEDIUM"
+        )
+        
+        # Use the correct parameter name
+        resp = circle_api.create_developer_transaction_transfer(
+            create_transfer_transaction_for_developer_request=request
+        )
+        
         tx_id = resp.data.id
         log(f"🚀 Signed & Sent! Circle ID: {tx_id}", "payment")
         
@@ -75,7 +83,7 @@ def pay_network(state):
     except Exception as e:
         log(f"Payment Failed: {e}", "error")
         return {"status": "error"}
-
+       
 workflow = StateGraph(AgentState)
 workflow.add_node("check", check_api)
 workflow.add_node("pay", pay_network)

@@ -16,10 +16,13 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path
-from gateway.views import home, premium_data
+from gateway.views import  premium_data, dashboard, get_logs, report_log
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('',home),
-    path('api/premium/',premium_data)
+    path('api/premium/',premium_data),
+    path('dashboard/', dashboard),
+    # API Endpoints
+    path('api/get-logs/', get_logs),
+    path('api/report-log/', report_log),
 ]
