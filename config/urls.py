@@ -16,7 +16,10 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path
+from gateway.views import home, premium_data
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('',home),
+    path('api/premium/',premium_data)
 ]
