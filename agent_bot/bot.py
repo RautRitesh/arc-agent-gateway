@@ -3,119 +3,86 @@ import requests
 import time
 from typing import TypedDict, Optional
 from langgraph.graph import StateGraph, END
-from web3 import Web3
 from dotenv import load_dotenv
+from circle.web3 import utils
+from circle.web3 import developer_controlled_wallets
 
 load_dotenv()
-
-# --- CONFIGURATION ---
-ARC_RPC_URL = os.getenv("ARC_RPC_URL", "https://rpc.testnet.arc.network")
-AGENT_PRIVATE_KEY = os.getenv("AGENT_PRIVATE_KEY") # You must add this to .env!
 API_URL = "http://127.0.0.1:8000/api/premium/"
+DASHBOARD_URL = "http://127.0.0.1:8000/api/report-log/"
 
-# Setup Web3
-w3 = Web3(Web3.HTTPProvider(ARC_RPC_URL))
-account = w3.eth.account.from_key(AGENT_PRIVATE_KEY)
+# Setup Circle
+client = utils.init_developer_controlled_wallets_client(
+    api_key=os.getenv("CIRCLE_API_KEY"),
+    entity_secret=os.getenv("CIRCLE_ENTITY_SECRET")
+)
+circle_api = developer_controlled_wallets.DeveloperControlledWalletsApi(client)
 
-# --- 1. DEFINE AGENT STATE ---
 class AgentState(TypedDict):
-    status: str          # 'idle', 'needs_payment', 'success'
-    invoice: dict        # The payment request from Django
-    tx_hash: Optional[str] # The proof of payment
-    data: Optional[dict]   # The final data received
+    status: str; invoice: dict; tx_hash: Optional[str]
 
-# --- 2. NODE: CHECK API ---
-def check_api_node(state: AgentState):
-    print("\n🤖 AGENT: Attempting to fetch data...")
-    
-    headers = {}
-    # If we have a hash, attach it!
-    if state.get('tx_hash'):
-        print(f"🎫 AGENT: Presenting receipt: {state['tx_hash'][:10]}...")
-        headers['Authorization'] = f"Arc {state['tx_hash']}"
+def log(msg, type="info", tx_hash=None):
+    print(msg)
+    try: requests.post(DASHBOARD_URL, json={"message": msg, "type": type, "tx_hash": tx_hash})
+    except: pass
+
+def check_api(state):
+    log("🤖 Agent connecting to Marketplace...", "info")
+    headers = {'Authorization': f"Arc {state.get('tx_hash')}"} if state.get('tx_hash') else {}
     
     try:
-        response = requests.get(API_URL, headers=headers)
-        
-        if response.status_code == 200:
-            print("✅ AGENT: Access Granted!")
-            return {"status": "success", "data": response.json()}
-            
-        elif response.status_code == 402:
-            print("⛔ AGENT: Hit Paywall (402). Analyzing invoice...")
-            return {"status": "needs_payment", "invoice": response.json()['invoice']}
-            
-        else:
-            print(f"❌ AGENT: Unexpected Error {response.status_code}")
-            return {"status": "error"}
-            
+        res = requests.get(API_URL, headers=headers)
+        if res.status_code == 200:
+            log("✅ PAYMENT ACCEPTED! Data Received.", "success", state.get('tx_hash'))
+            return {"status": "success"}
+        elif res.status_code == 402:
+            log("⛔ 402 PAYWALL DETECTED. Analyzing Invoice...", "error")
+            return {"status": "needs_payment", "invoice": res.json()['invoice']}
     except Exception as e:
-        return {"status": "error", "data": str(e)}
+        log(f"Error: {e}", "error")
+        return {"status": "error"}
 
-# --- 3. NODE: MAKE PAYMENT ---
-# --- 3. NODE: MAKE PAYMENT ---
-def payment_node(state: AgentState):
+def pay_network(state):
     invoice = state['invoice']
-    amount = invoice['amount']
+    amount = str(invoice['amount'])
     dest = invoice['destination_address']
     
-    print(f"💸 AGENT: Decided to pay {amount} USDC to {dest}...")
+    log(f"💸 Authorizing Circle Wallet: Pay {amount} USDC...", "payment")
     
-    # Construct Transaction (Native USDC Transfer on Arc)
-    tx = {
-        'nonce': w3.eth.get_transaction_count(account.address),
-        'to': dest,
-        'value': w3.to_wei(amount, 'ether'), # 1.0 USDC
-        'gas': 21000,
-        'gasPrice': w3.eth.gas_price,
-        'chainId': 5042002 
-    }
+    req = developer_controlled_wallets.CreateTransferTransactionRequest.from_dict({
+        "walletId": os.getenv("CIRCLE_WALLET_ID"),
+        "tokenId": os.getenv("USDC_TOKEN_ID"),
+        "destinationAddress": dest,
+        "amounts": [amount],
+        "feeLevel": "MEDIUM"
+    })
     
-    # Sign & Send
-    signed_tx = w3.eth.account.sign_transaction(tx, AGENT_PRIVATE_KEY)
-    
-    # --- FIX IS HERE (Use snake_case) ---
-    tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction) 
-    hex_hash = w3.to_hex(tx_hash)
-    
-    print(f"🚀 AGENT: Payment Sent! Hash: {hex_hash}")
-    
-    # Wait for block confirmation (Crucial for Arc verification)
-    print("⏳ AGENT: Waiting for block confirmation...")
-    w3.eth.wait_for_transaction_receipt(tx_hash)
-    
-    return {"tx_hash": hex_hash}
-# --- 4. BUILD THE GRAPH ---
+    try:
+        resp = circle_api.create_developer_controlled_wallets_transfer_transaction(req)
+        tx_id = resp.data.id
+        log(f"🚀 Signed & Sent! Circle ID: {tx_id}", "payment")
+        
+        # Poll for Hash
+        for i in range(10):
+            time.sleep(2)
+            tx = circle_api.get_transaction(id=tx_id).data.transaction
+            if tx.tx_hash:
+                log(f"🔗 On-Chain Hash Confirmed: {tx.tx_hash}", "payment")
+                return {"tx_hash": tx.tx_hash}
+            log("⏳ Waiting for Arc block confirmation...", "info")
+            
+        return {"status": "error"}
+    except Exception as e:
+        log(f"Payment Failed: {e}", "error")
+        return {"status": "error"}
+
 workflow = StateGraph(AgentState)
-
-# Add Nodes
-workflow.add_node("check_api", check_api_node)
-workflow.add_node("pay_network", payment_node)
-
-# Set Entry Point
-workflow.set_entry_point("check_api")
-
-# Define Logic
-def decide_next_step(state):
-    if state['status'] == 'needs_payment':
-        return "pay_network"
-    elif state['status'] == 'success':
-        return END
-    else:
-        return END
-
-workflow.add_conditional_edges(
-    "check_api",
-    decide_next_step
-)
-
-# Payment always loops back to check api
-workflow.add_edge("pay_network", "check_api")
-
-# Compile
+workflow.add_node("check", check_api)
+workflow.add_node("pay", pay_network)
+workflow.set_entry_point("check")
+workflow.add_conditional_edges("check", lambda x: "pay" if x['status'] == "needs_payment" else END)
+workflow.add_edge("pay", "check")
 app = workflow.compile()
 
-# --- 5. RUN IT ---
 if __name__ == "__main__":
-    print("--- STARTING AUTONOMOUS COMMERCE AGENT ---")
     app.invoke({"status": "idle", "invoice": {}, "tx_hash": None})
