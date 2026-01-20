@@ -53,6 +53,7 @@ def check_api_node(state: AgentState):
         return {"status": "error", "data": str(e)}
 
 # --- 3. NODE: MAKE PAYMENT ---
+# --- 3. NODE: MAKE PAYMENT ---
 def payment_node(state: AgentState):
     invoice = state['invoice']
     amount = invoice['amount']
@@ -72,7 +73,9 @@ def payment_node(state: AgentState):
     
     # Sign & Send
     signed_tx = w3.eth.account.sign_transaction(tx, AGENT_PRIVATE_KEY)
-    tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+    
+    # --- FIX IS HERE (Use snake_case) ---
+    tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction) 
     hex_hash = w3.to_hex(tx_hash)
     
     print(f"🚀 AGENT: Payment Sent! Hash: {hex_hash}")
@@ -82,7 +85,6 @@ def payment_node(state: AgentState):
     w3.eth.wait_for_transaction_receipt(tx_hash)
     
     return {"tx_hash": hex_hash}
-
 # --- 4. BUILD THE GRAPH ---
 workflow = StateGraph(AgentState)
 

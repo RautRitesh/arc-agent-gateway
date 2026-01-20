@@ -9,31 +9,42 @@ load_dotenv()
 # Connect to Arc Network
 w3 = Web3(Web3.HTTPProvider(os.getenv("ARC_RPC_URL")))
 MERCHANT_WALLET = os.getenv("MERCHANT_WALLET")
-PRICE = 1.0  # 1 USDC
+PRICE = 0.1  # 1 USDC
 
 class ArcPaywallMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
-        # 1. Check if the view demands payment
-        if not getattr(request, 'is_paywalled', False):
-            return self.get_response(request)
+        # Standard middleware call - just pass the request along
+        # The real work now happens in process_view
+        response = self.get_response(request)
+        return response
 
-        # 2. Check for the Payment Header
-        # Format: "Authorization: Arc <TX_HASH>"
-        auth_header = request.headers.get('Authorization', '')
+    def process_view(self, request, view_func, view_args, view_kwargs):
+        """
+        Called just before the view is executed.
+        This is where we check if the view is tagged as 'paywalled'.
+        """
+        # 1. Check if the view function has the tag we set in the decorator
+        if getattr(view_func, 'is_paywalled', False):
+            
+            # 2. Check for the Payment Header
+            # Format: "Authorization: Arc <TX_HASH>"
+            auth_header = request.headers.get('Authorization', '')
+            
+            if not auth_header.startswith('Arc '):
+                return self.send_402_invoice()
+
+            tx_hash = auth_header.split(' ')[1]
+
+            # 3. Verify the Payment on Blockchain
+            if self.verify_transaction(tx_hash):
+                return None # Return None means "Continue to the view"
+            else:
+                return JsonResponse({'error': 'Payment invalid or pending'}, status=403)
         
-        if not auth_header.startswith('Arc '):
-            return self.send_402_invoice()
-
-        tx_hash = auth_header.split(' ')[1]
-
-        # 3. Verify the Payment on Blockchain
-        if self.verify_transaction(tx_hash):
-            return self.get_response(request)
-        else:
-            return JsonResponse({'error': 'Payment invalid or pending'}, status=403)
+        return None # Not a paywalled view, continue
 
     def send_402_invoice(self):
         """Returns the HTTP 402 Error with payment instructions."""
@@ -47,7 +58,7 @@ class ArcPaywallMiddleware:
                 'chain_id': 5042002,  # Arc Chain ID
                 'destination_address': MERCHANT_WALLET
             }
-        }, status=402) #
+        }, status=402)
         return response
 
     def verify_transaction(self, tx_hash):
@@ -61,9 +72,6 @@ class ArcPaywallMiddleware:
                 return False
 
             # CRITICAL CHECK 2: Is it enough USDC?
-            # On Arc, USDC is the "native gas", so we check the 'value' field.
-            # 'value' is in Wei (1 USDC = 10^18 Wei on Arc typically, or 10^6 depending on implementation)
-            # Standard Arc Testnet uses 18 decimals for native USDC gas.
             value_in_usdc = w3.from_wei(tx['value'], 'ether')
             
             if float(value_in_usdc) < PRICE:
