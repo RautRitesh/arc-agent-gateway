@@ -19,7 +19,6 @@ class AgentState(TypedDict):
 
 class CircleAgent:
     def __init__(self):
-        # Setup Circle Client
         self.client = utils.init_developer_controlled_wallets_client(
             api_key=os.getenv("CIRCLE_API_KEY"),
             entity_secret=os.getenv("CIRCLE_ENTITY_SECRET")
