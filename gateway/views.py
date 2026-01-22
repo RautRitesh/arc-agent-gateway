@@ -8,35 +8,43 @@ agent_logs = []
 payment_status = {"status": "LOCKED", "tx_hash": None}
 
 def dashboard(request):
+    """Renders the main monitoring dashboard"""
     return render(request, 'dashboard.html')
 
 def start_agent(request):
-    """Triggered by frontend to prevent page hang"""
+    """Triggered by frontend to start the automated agent loop"""
     agent = CircleAgent()
     bot = agent()
     bot.invoke({"status": "idle", "invoice": {}, "tx_hash": None})
     return JsonResponse({"status": "finished"})
 
 def premium_data(request):
-    """Returns Institutional-Grade Financial Audit Data"""
+    """
+    Returns Institutional-Grade Market Intelligence.
+    This data is protected by ArcPaywallMiddleware.
+    """
     return JsonResponse({
         "status": "success",
         "data": {
-            "report_id": "ARC-AUDIT-992",
-            "asset": "USDC/ARC Liquidity Pool",
-            "risk_score": "2.1 (Low Risk)",
-            "tvl_verified": "$1,240,500.00",
-            "slippage_analysis": "0.04% for $10k swap",
-            "health_factor": "98.5%",
-            "last_audit": time.strftime("%Y-%m-%d %H:%M:%S")
+            "title": "Arc Network Analytics Report",
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "metrics": [
+                {"label": "Total Value Locked", "value": "$14.2M", "trend": "+2.4%"},
+                {"label": "24h Network Volume", "value": "$842,000", "trend": "-0.5%"},
+                {"label": "Active AI Agents", "value": "1,242", "trend": "+12%"},
+                {"label": "Avg Transaction Cost", "value": "0.002 USDC", "trend": "Stable"}
+            ],
+            "intelligence": "Liquidity concentration is increasing in USDC/ARC pools. High-frequency agents are currently seeing optimal execution speeds."
         }
     })
 
 def get_logs(request):
+    """Returns the last 20 logs and current payment status for polling"""
     return JsonResponse({"logs": agent_logs[-20:], "payment_status": payment_status})
 
 @csrf_exempt
 def report_log(request):
+    """Endpoint for the agent to report its status back to the dashboard"""
     if request.method == 'POST':
         data = json.loads(request.body)
         agent_logs.append({
