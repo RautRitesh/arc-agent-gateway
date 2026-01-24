@@ -6,8 +6,8 @@ from circle.web3 import developer_controlled_wallets
 load_dotenv()
 
 client = utils.init_developer_controlled_wallets_client(
-    api_key=os.getenv("CIRCLE_API_KEY"),
-    entity_secret=os.getenv("CIRCLE_ENTITY_SECRET")
+    api_key=os.getenv("CIRCLE_API_KEY_2"),
+    entity_secret=os.getenv("CIRCLE_ENTITY_SECRET_2")
 )
 
 wallet_sets_api = developer_controlled_wallets.WalletSetsApi(client)

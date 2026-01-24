@@ -4,8 +4,8 @@ import requests
 
 load_dotenv()
 
-api_key = os.getenv("CIRCLE_API_KEY")
-wallet_id = os.getenv("CIRCLE_WALLET_ID")
+api_key = os.getenv("CIRCLE_API_KEY_2")
+wallet_id = os.getenv("CIRCLE_WALLET_ID_2")
 
 headers = {
     "Authorization": f"Bearer {api_key}",
